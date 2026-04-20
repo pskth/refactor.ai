@@ -1,0 +1,7 @@
+[project]
+name = "refactor-cli"
+version = "0.1.0"
+dependencies = ["typer"]
+
+[project.scripts]
+refactor = "refactor.cli:app"
