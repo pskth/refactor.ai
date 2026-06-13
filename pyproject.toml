@@ -1,6 +1,9 @@
 [project]
-name = "refactor-cli"
+name = "refactor-cli"        # must be unique on PyPI
 version = "0.1.0"
+description = "CLI tool to organize files using AI"
+readme = "README.md"
+requires-python = ">=3.8"
 dependencies = ["typer"]
 
 [project.scripts]
