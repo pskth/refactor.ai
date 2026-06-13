@@ -10,7 +10,7 @@ app = typer.Typer(no_args_is_help=True)
 
 @app.command()
 def version():
-    """Print Version Information"""
+    """Print version information"""
     print(get_version("refactor-cli"))
 
 # @app.command()
@@ -24,6 +24,7 @@ if __name__ == "__main__":
 # validates folder
 @app.command()
 def tree(path: str = "."):
+    """Display folder structure of given path"""
     try:
         validate_path(path)
         print_tree(path)
