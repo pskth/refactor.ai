@@ -1,0 +1,70 @@
+{
+  "generated_at": "2026-09-02T08:23:00.591127+00:00",
+  "source_dir": "/home/pskth/projects/refactor.ai/test-images",
+  "images": [
+    {
+      "file_path": "/home/pskth/projects/refactor.ai/test-images/animal2.jpeg",
+      "upload_id": "i086e50d84a44e3d0abd4a251eloosWs",
+      "tags": [
+        "predator",
+        "lion",
+        "big cat",
+        "feline",
+        "cat",
+        "wildlife",
+        "safari",
+        "wild",
+        "carnivore",
+        "mammal"
+      ],
+      "confidences": {
+        "predator": 100,
+        "lion": 100,
+        "big cat": 100,
+        "feline": 100,
+        "cat": 82.65,
+        "wildlife": 76.08,
+        "safari": 66.67,
+        "wild": 66.44,
+        "carnivore": 62.74,
+        "mammal": 58.86
+      },
+      "caption": "",
+      "primary_folder": "predator"
+    },
+    {
+      "file_path": "/home/pskth/projects/refactor.ai/test-images/party.jpeg",
+      "upload_id": "i089ef8b59b9df314d5740ea3aPccyAN",
+      "tags": [
+        "shop",
+        "mercantile establishment",
+        "toyshop",
+        "confectionery",
+        "place of business"
+      ],
+      "confidences": {
+        "shop": 100,
+        "mercantile establishment": 83.54,
+        "toyshop": 80.05,
+        "confectionery": 60.65,
+        "place of business": 55.63
+      },
+      "caption": "",
+      "primary_folder": "shop"
+    },
+    {
+      "file_path": "/home/pskth/projects/refactor.ai/test-images/birthday.jpeg",
+      "upload_id": "i083defaf39860be1f8f1d3213GRwCqm",
+      "tags": [
+        "toyshop",
+        "shop"
+      ],
+      "confidences": {
+        "toyshop": 50.22,
+        "shop": 44.04
+      },
+      "caption": "",
+      "primary_folder": "toyshop"
+    }
+  ]
+}
