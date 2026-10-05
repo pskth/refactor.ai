@@ -1,6 +1,6 @@
 # refactor.ai
 
-`refactor.ai` is a Python CLI for inspecting local directories before automating file organization. The first release provides safe path validation, directory-tree output, metadata scanning, and optional ignore rules. The package is published as [`refactor-cli`](https://pypi.org/project/refactor-cli/) and targets Python 3.8+.
+`refactor.ai` is a Python CLI for inspecting local directories before automating file organization. The package is published as [`refactor-cli`](https://pypi.org/project/refactor-cli/) and targets Python 3.8+.
 
 ## Current scope
 
@@ -9,10 +9,27 @@ The CLI entry point in [refactor/cli.py](refactor/cli.py) provides:
 - `version` — prints the installed package version.
 - `tree` — prints a recursive directory tree through [refactor/tree.py](refactor/tree.py).
 - `scan` — collects basic file and directory metadata through [refactor/scanner.py](refactor/scanner.py) and [refactor/metadata.py](refactor/metadata.py).
+- `setup` — configures a multimodal backend (`hosted` or `local`), persisted to `~/.refactor/config.json`.
+- `get-image-context` — classifies images using a backend shim layer and writes JSON context.
+- `refactor-images` — copies or moves images based on generated context.
 - Path checks through [refactor/validation.py](refactor/validation.py), including existence, directory type, and read access.
 - Optional filename exclusions through [refactor/ignore.py](refactor/ignore.py).
 
-This release inspects the filesystem only. It does not currently call an AI provider, rename files, move files, or apply organization changes.
+On first CLI run, users are prompted to run setup. They can rerun setup anytime with `refactor setup` or edit `~/.refactor/config.json` directly.
+
+## Setup workflow
+
+After installing `refactor-cli`, the first CLI run prompts:
+
+1. **Hosted model (bring your own API keys)**  
+   - Prompts for `IMAGGA_API_KEY`, `IMAGGA_API_SECRET`, and `GEMINI_API_KEY`  
+   - Saves credentials to `~/.refactor/.env` with restricted file permissions
+2. **Local multimodal recommendation (stub)**  
+   - Detects basic hardware (CPU, memory, NVIDIA GPU/VRAM if available)  
+   - Recommends an OSS multimodal model and records it in config  
+   - Uses a local shim stub today (full local runtime integration is a follow-up)
+
+The shim layer provides one interface for image classification, regardless of hosted/local backend, so future modalities can reuse the same abstraction.
 
 ## Techniques used
 
