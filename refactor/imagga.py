@@ -15,9 +15,12 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
+from refactor.config import ENV_FILE
 
 # Load .env from the current working directory (or any parent)
 load_dotenv()
+if ENV_FILE.exists():
+    load_dotenv(ENV_FILE)
 
 BASE_URL = "https://api.imagga.com/v2"
 DEFAULT_MIN_CONFIDENCE = 40.0
