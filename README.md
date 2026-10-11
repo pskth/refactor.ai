@@ -15,6 +15,10 @@ The CLI entry point in [refactor/cli.py](refactor/cli.py) provides:
 - `refactor-images` — automatically refreshes image context, then moves images
   into Gemini-selected existing or new category folders (`--copy` is available
   when the originals must be retained).
+- `refactor-text` — uses Gemini to categorize `.txt`, `.md`, `.pdf`, and
+  `.docx` files.
+- `now` — runs `refactor-text` and then `refactor-images`, so mixed folders are
+  organized in one invocation.
 - Path checks through [refactor/validation.py](refactor/validation.py), including existence, directory type, and read access.
 - Optional filename exclusions through [refactor/ignore.py](refactor/ignore.py).
 
@@ -44,6 +48,10 @@ reuse the same abstraction.
 Run `refactor refactor-images ./incoming --output-dir ./organized` to generate
 fresh context and move the images. Add `--dry-run` to inspect destinations or
 `--copy` to retain the originals.
+
+Run `refactor now ./incoming --output-dir ./organized` to organize supported
+documents and images together. PDFs are sent to Gemini as native document input;
+text, Markdown, and Word files are text-extracted locally before classification.
 
 ## Techniques used
 

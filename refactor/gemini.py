@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import base64
 from pathlib import Path
 
 import requests
@@ -101,3 +102,55 @@ class GeminiFolderClassifier:
         for index, context in enumerate(contexts):
             context.primary_folder = folders[index]
         return contexts
+
+    def choose_document_folder(
+        self,
+        file_path: Path,
+        extracted_text: str,
+        category_root: Path,
+        is_pdf: bool = False,
+    ) -> str:
+        """Choose one folder from a document's text or native PDF content."""
+        prompt = (
+            "Choose one concise, lowercase category folder for this document. "
+            "Use letters, numbers, spaces, underscores, or hyphens only; return "
+            "JSON only as {\"folder\":\"example\"}. Prefer an existing category "
+            "when it fits. Do not use a filename or path.\n\n"
+            f"Existing categories: {json.dumps(sorted(entry.name for entry in category_root.iterdir() if entry.is_dir()))}\n"
+            f"Filename: {file_path.name}\n"
+        )
+        parts = [{"text": prompt + ("The PDF is attached." if is_pdf else extracted_text)}]
+        if is_pdf:
+            parts.append(
+                {
+                    "inlineData": {
+                        "mimeType": "application/pdf",
+                        "data": base64.b64encode(file_path.read_bytes()).decode("ascii"),
+                    }
+                }
+            )
+
+        payload = {
+            "contents": [{"parts": parts}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "temperature": 0,
+            },
+        }
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{self.model}:generateContent"
+        )
+        response = requests.post(
+            url, headers={"x-goog-api-key": self.api_key}, json=payload, timeout=60
+        )
+        if not response.ok:
+            raise requests.HTTPError(
+                f"Gemini document classification returned {response.status_code}: {response.text}",
+                response=response,
+            )
+        try:
+            text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+            return _safe_folder_name(str(json.loads(text)["folder"]))
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            raise ValueError("Gemini returned an invalid document-folder response") from exc

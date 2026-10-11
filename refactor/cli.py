@@ -14,6 +14,12 @@ from refactor.organizer import (
 from refactor.scanner import scan_directory
 from refactor.setup import command_setup, ensure_backend_configured, maybe_run_first_time_setup
 from refactor.shim import build_image_classifier, choose_category_folders
+from refactor.text import (
+    classify_documents,
+    managed_text_dirs,
+    save_managed_text_dirs,
+    scan_documents,
+)
 from refactor.tree import print_tree
 from refactor.validation import validate_path
 
@@ -121,7 +127,7 @@ def get_image_context(
 
     if not images:
         typer.echo("No image files found in the specified directory.")
-        raise typer.Exit(code=0)
+        return []
 
     typer.echo(f"Found {len(images)} image(s) in '{path}'")
 
@@ -183,6 +189,61 @@ def get_image_context(
     return results
 
 
+@app.command(name="refactor-text")
+def refactor_text(
+    path: str = typer.Argument(".", help="Directory containing documents to organize"),
+    output_dir: str = typer.Option(".", "--output-dir", "-d"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    move: bool = typer.Option(True, "--move/--copy"),
+) -> list:
+    """Use Gemini to categorize .txt, .md, .pdf, and .docx files."""
+    from pathlib import Path
+
+    try:
+        validate_path(path)
+        out = Path(output_dir)
+        if not out.exists() or not out.is_dir():
+            raise ValueError(f"Output directory is not a directory: {output_dir}")
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    patterns = load_ignore_patterns()
+    excluded = managed_text_dirs(out) if Path(path).resolve() == out.resolve() else set()
+    documents = scan_documents(path, patterns, excluded)
+    if not documents:
+        typer.echo("No supported document files found in the specified directory.")
+        return []
+
+    typer.echo(f"Found {len(documents)} document(s) in '{path}'")
+    try:
+        contexts, failures = classify_documents(documents, out)
+    except EnvironmentError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    for document, error in failures:
+        typer.echo(f"  [!] Skipping {document.name}: {error}", err=True)
+
+    if not contexts:
+        typer.echo("No documents were categorized.")
+        return []
+
+    moves = plan_moves(contexts, out)
+    if dry_run:
+        typer.echo(f"\n[Dry Run] Planned document moves ({len(moves)} files):")
+        for src, dst in moves:
+            typer.echo(f"  {src} → {dst}")
+        return contexts
+
+    summary = execute_moves(moves, copy=not move)
+    folders = {destination.parent.name for _, destination in moves}
+    if not summary["failed"]:
+        save_managed_text_dirs(out, folders)
+    verb = "Moved" if move else "Copied"
+    typer.echo(f"{verb} {summary['moved'] if move else summary['copied']} document(s).")
+    return contexts
+
+
 @app.command(name="refactor-images")
 def refactor_images(
     path: str = typer.Argument(".", help="Directory containing images to organize"),
@@ -213,7 +274,7 @@ def refactor_images(
         "--min-confidence",
         help="Minimum Imagga tag confidence to retain",
     ),
-) -> None:
+) -> list:
     """
     Generate fresh Imagga and Gemini context, then organise images into
     Gemini-selected subdirectories. The context cache is refreshed on every run.
@@ -250,7 +311,7 @@ def refactor_images(
 
     if not contexts:
         typer.echo("Context cache is empty. Nothing to organize.")
-        raise typer.Exit(code=0)
+        return []
 
     moves = plan_moves(contexts, out)
 
@@ -265,7 +326,7 @@ def refactor_images(
         for src, dst in moves:
             typer.echo(f"  {src.name:<40} {dst}")
         typer.echo(f"\n  No files were {verb_past}.")
-        raise typer.Exit(code=0)
+        return contexts
 
     folders = {dst.parent.name for _, dst in moves}
     typer.echo(f"\nWill {action_word.lower()} {len(moves)} image(s) into {len(folders)} folder(s):")
@@ -285,6 +346,29 @@ def refactor_images(
         typer.echo(f"  Failed  : {summary['failed']} file(s)")
     typer.echo(f"  Output  : {out.resolve()}")
     typer.echo(f"{'─' * 52}")
+    return contexts
+
+
+@app.command(name="now")
+def refactor_now(
+    path: str = typer.Argument(".", help="Directory containing documents and images"),
+    output_dir: str = typer.Option(".", "--output-dir", "-d"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    move: bool = typer.Option(True, "--move/--copy"),
+    min_confidence: float = typer.Option(40.0, "--min-confidence"),
+) -> None:
+    """Categorize supported documents first, then images in a mixed folder."""
+    typer.echo("\n[1/2] Categorizing documents")
+    refactor_text(path=path, output_dir=output_dir, dry_run=dry_run, move=move)
+    typer.echo("\n[2/2] Categorizing images")
+    refactor_images(
+        path=path,
+        context=DEFAULT_CACHE_FILE,
+        output_dir=output_dir,
+        dry_run=dry_run,
+        move=move,
+        min_confidence=min_confidence,
+    )
 
 
 if __name__ == "__main__":
