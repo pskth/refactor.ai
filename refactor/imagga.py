@@ -22,7 +22,10 @@ load_dotenv()
 if ENV_FILE.exists():
     load_dotenv(ENV_FILE)
 
-BASE_URL = "https://api.imagga.com/v2"
+# Imagga V3 is the structured tagging endpoint requested by the CLI workflow.
+# Uploads remain on V2 because V3 accepts an image URL or an upload identifier.
+UPLOADS_URL = "https://api.imagga.com/v2/uploads"
+TAGS_URL = "https://api.imagga.com/v3/tags"
 DEFAULT_MIN_CONFIDENCE = 40.0
 DEFAULT_TAG_LIMIT = 10
 
@@ -75,11 +78,9 @@ class ImaggaClient:
 
     def upload_image(self, file_path: Path) -> str:
         """Upload a local image to Imagga and return the upload_id."""
-        url = f"{BASE_URL}/uploads"
-
         with open(file_path, "rb") as image_file:
             response = requests.post(
-                url,
+                UPLOADS_URL,
                 auth=self.auth,
                 files={"image": (file_path.name, image_file)},
                 timeout=60,
@@ -100,7 +101,7 @@ class ImaggaClient:
 
     def _fetch_tags(self, params: dict) -> dict:
         """Internal: call /tags endpoint and return parsed JSON."""
-        url = f"{BASE_URL}/tags"
+        url = TAGS_URL
         params = {**params, "model": "pro", "include_caption": "true"}
 
         response = requests.get(url, auth=self.auth, params=params, timeout=60)
@@ -124,19 +125,37 @@ class ImaggaClient:
 
         # Tags
         raw_tags = result.get("tags", [])
+        # V3 groups tags by semantic type; flatten those groups while retaining
+        # compatibility with the V2 list response used by older accounts.
+        if isinstance(raw_tags, dict):
+            raw_tags = [
+                item for group in raw_tags.values() if isinstance(group, list)
+                for item in group if isinstance(item, dict)
+            ]
         filtered = [
             t for t in raw_tags
-            if t.get("confidence", 0) >= self.min_confidence
+            if float(t.get("confidence", 0)) >= self.min_confidence
         ]
-        filtered.sort(key=lambda t: t["confidence"], reverse=True)
+        filtered.sort(key=lambda t: float(t.get("confidence", 0)), reverse=True)
         filtered = filtered[:DEFAULT_TAG_LIMIT]
 
-        tags = [t["tag"]["en"] for t in filtered]
-        confidences = {t["tag"]["en"]: round(t["confidence"], 2) for t in filtered}
+        def tag_name(tag: dict) -> str:
+            value = tag.get("tag", tag.get("name", ""))
+            return value.get("en", "") if isinstance(value, dict) else str(value)
+
+        tags = [tag_name(t) for t in filtered if tag_name(t)]
+        confidences = {tag_name(t): round(float(t["confidence"]), 2) for t in filtered if tag_name(t)}
 
         # Caption
-        captions = result.get("captions", [])
-        caption = captions[0].get("text", "") if captions else ""
+        captions = result.get("captions", result.get("caption", []))
+        if isinstance(captions, str):
+            caption = captions
+        elif isinstance(captions, list):
+            caption = captions[0].get("text", "") if captions else ""
+        elif isinstance(captions, dict):
+            caption = str(captions.get("text", ""))
+        else:
+            caption = ""
 
         # Primary folder from top tag
         primary_folder = _sanitize_folder_name(tags[0]) if tags else "uncategorized"

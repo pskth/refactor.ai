@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from refactor.imagga import ImageContext, ImaggaClient
+from refactor.gemini import GeminiFolderClassifier
 
 
 class ImageClassifier(ABC):
@@ -18,6 +19,11 @@ class HostedImageClassifier(ImageClassifier):
 
     def classify_image(self, file_path: Path) -> ImageContext:
         return self.client.get_tags(file_path)
+
+    def choose_folders(
+        self, contexts: list[ImageContext], category_root: Path
+    ) -> list[ImageContext]:
+        return GeminiFolderClassifier().choose_folders(contexts, category_root)
 
 
 class LocalStubImageClassifier(ImageClassifier):
@@ -56,3 +62,12 @@ def build_image_classifier(config: dict, min_confidence: float) -> ImageClassifi
     raise EnvironmentError(
         "Refactor setup is incomplete. Run 'refactor setup' to configure hosted or local backend."
     )
+
+
+def choose_category_folders(
+    config: dict, contexts: list[ImageContext], category_root: Path
+) -> list[ImageContext]:
+    """Use Gemini for hosted classifications; local mode keeps its stub result."""
+    if config.get("backend") == "hosted":
+        return GeminiFolderClassifier().choose_folders(contexts, category_root)
+    return contexts

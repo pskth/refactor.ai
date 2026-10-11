@@ -12,16 +12,22 @@ from refactor.ignore import should_ignore
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
 
 
-def scan_images(path: str, ignore_patterns: list[str]) -> list[Path]:
+def scan_images(
+    path: str, ignore_patterns: list[str], excluded_dirs: set[Path] | None = None
+) -> list[Path]:
     """
     Recursively scan *path* and return all image files.
 
     Files matching any pattern in *ignore_patterns* are skipped.
     """
     images: list[Path] = []
+    excluded_dirs = {directory.resolve() for directory in (excluded_dirs or set())}
 
     for item in Path(path).rglob("*"):
         if item.is_dir():
+            continue
+
+        if any(directory in item.resolve().parents for directory in excluded_dirs):
             continue
 
         if should_ignore(item.name, ignore_patterns):

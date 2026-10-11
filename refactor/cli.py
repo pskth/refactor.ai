@@ -1,14 +1,19 @@
 import typer
 from importlib.metadata import version as get_version
 
-from refactor.context_store import save_context
+from refactor.context_store import DEFAULT_CACHE_FILE, save_context
 from refactor.ignore import load_ignore_patterns
 from refactor.image_scanner import scan_images
 from refactor.metadata import get_metadata
-from refactor.organizer import execute_moves, plan_moves
+from refactor.organizer import (
+    execute_moves,
+    managed_category_dirs,
+    plan_moves,
+    save_managed_category_dirs,
+)
 from refactor.scanner import scan_directory
 from refactor.setup import command_setup, ensure_backend_configured, maybe_run_first_time_setup
-from refactor.shim import build_image_classifier
+from refactor.shim import build_image_classifier, choose_category_folders
 from refactor.tree import print_tree
 from refactor.validation import validate_path
 
@@ -79,7 +84,17 @@ def get_image_context(
         "-v",
         help="Print per-image tag results to stdout",
     ),
-) -> None:
+    category_root: str = typer.Option(
+        ".",
+        "--category-root",
+        help="Directory whose existing folders Gemini may reuse",
+    ),
+    write_context: bool = typer.Option(
+        True,
+        "--write-context/--no-write-context",
+        hidden=True,
+    ),
+) -> list:
     """
     Scan directory images using configured backend shim and save
     tags/captions to JSON context cache.
@@ -88,13 +103,21 @@ def get_image_context(
 
     try:
         validate_path(path)
+        if not Path(category_root).exists() or not Path(category_root).is_dir():
+            raise ValueError(f"Category root is not a directory: {category_root}")
         config = ensure_backend_configured()
     except (ValueError, EnvironmentError) as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
 
     patterns = load_ignore_patterns()
-    images = scan_images(path, patterns)
+    source_root = Path(path).resolve()
+    destination_root = Path(category_root).resolve()
+    excluded_dirs = (
+        managed_category_dirs(destination_root)
+        if source_root == destination_root else set()
+    )
+    images = scan_images(path, patterns, excluded_dirs)
 
     if not images:
         typer.echo("No image files found in the specified directory.")
@@ -117,24 +140,36 @@ def get_image_context(
                 ctx = classifier.classify_image(img_path)
                 results.append(ctx)
 
-                if verbose:
-                    typer.echo(f"\n  {img_path.name}")
-                    typer.echo(f"    Folder   : {ctx.primary_folder}")
-                    typer.echo(f"    Tags     : {', '.join(ctx.tags[:5])}")
-                    typer.echo(f"    Caption  : {ctx.caption}")
-
             except Exception as exc:
                 typer.echo(f"\n  [!] Skipping {img_path.name}: {exc}", err=True)
                 failed += 1
 
+    if results:
+        try:
+            results = choose_category_folders(config, results, Path(category_root))
+        except Exception as exc:
+            # Folder selection is an essential part of the hosted workflow; do
+            # not silently fall back to an Imagga top-tag directory.
+            typer.echo(f"Error: Gemini folder selection failed: {exc}", err=True)
+            raise typer.Exit(code=1)
+
+    if verbose:
+        for ctx in results:
+            typer.echo(f"\n  {Path(ctx.file_path).name}")
+            typer.echo(f"    Folder   : {ctx.primary_folder}")
+            typer.echo(f"    Tags     : {', '.join(ctx.tags[:5])}")
+            typer.echo(f"    Caption  : {ctx.caption}")
+
     output_path = Path(output)
-    save_context(results, path, output_path)
+    if write_context:
+        save_context(results, path, output_path)
 
     typer.echo(f"\n{'─' * 52}")
     typer.echo(f"  Processed : {len(results)} image(s)")
     if failed:
         typer.echo(f"  Failed    : {failed} image(s)")
-    typer.echo(f"  Cache     : {output_path.resolve()}")
+    if write_context:
+        typer.echo(f"  Cache     : {output_path.resolve()}")
     typer.echo(f"{'─' * 52}")
 
     if results:
@@ -145,14 +180,17 @@ def get_image_context(
             top_tags = ", ".join(ctx.tags[:3])
             typer.echo(f"  {fname:<28} {ctx.primary_folder:<20} {top_tags}")
 
+    return results
+
 
 @app.command(name="refactor-images")
 def refactor_images(
+    path: str = typer.Argument(".", help="Directory containing images to organize"),
     context: str = typer.Option(
         ".refactor_image_context.json",
         "--context",
         "-c",
-        help="Path to the JSON context cache (from get-image-context)",
+        help="Path to context cache (defaults to the source directory)",
     ),
     output_dir: str = typer.Option(
         ".",
@@ -166,32 +204,54 @@ def refactor_images(
         help="Print the planned moves without executing them",
     ),
     move: bool = typer.Option(
-        False,
-        "--move",
-        help="Move files instead of copying (destructive). Default is copy.",
+        True,
+        "--move/--copy",
+        help="Move files into categories. Use --copy to preserve source files.",
+    ),
+    min_confidence: float = typer.Option(
+        40.0,
+        "--min-confidence",
+        help="Minimum Imagga tag confidence to retain",
     ),
 ) -> None:
     """
-    Organise images into tag-named subdirectories using the context cache
-    produced by get-image-context.
+    Generate fresh Imagga and Gemini context, then organise images into
+    Gemini-selected subdirectories. The context cache is refreshed on every run.
 
-    By default, images are COPIED (non-destructive).
-    Use --move to move them instead.
+    By default, images are MOVED. Use --copy to preserve source files.
     """
     from pathlib import Path
-    from refactor.context_store import load_context
-
     try:
-        contexts = load_context(Path(context))
-    except FileNotFoundError as e:
+        validate_path(path)
+        out = Path(output_dir)
+        if not out.exists() or not out.is_dir():
+            raise ValueError(f"Output directory is not a directory: {output_dir}")
+    except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1)
+
+    context_path = Path(context)
+    if context == DEFAULT_CACHE_FILE:
+        context_path = Path(path) / DEFAULT_CACHE_FILE
+
+    excluded = managed_category_dirs(out) if Path(path).resolve() == out.resolve() else set()
+    if excluded:
+        typer.echo(f"Skipping {len(excluded)} folder(s) created by an earlier Refactor run.")
+
+    typer.echo("Generating image context with Imagga and Gemini...")
+    contexts = get_image_context(
+        path=path,
+        output=str(context_path),
+        min_confidence=min_confidence,
+        verbose=False,
+        category_root=output_dir,
+        write_context=not dry_run,
+    )
 
     if not contexts:
         typer.echo("Context cache is empty. Nothing to organize.")
         raise typer.Exit(code=0)
 
-    out = Path(output_dir)
     moves = plan_moves(contexts, out)
 
     action_word = "Move" if move else "Copy"
@@ -214,6 +274,8 @@ def refactor_images(
         typer.echo(f"  {out / folder}  ({count} file(s))")
 
     summary = execute_moves(moves, copy=not move)
+    if not summary["failed"]:
+        save_managed_category_dirs(out, folders)
 
     typer.echo(f"\n{'─' * 52}")
     count = summary["moved"] if move else summary["copied"]

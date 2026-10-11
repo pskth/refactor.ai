@@ -8,9 +8,35 @@ Pass copy=False to MOVE files instead.
 """
 
 import shutil
+import json
 from pathlib import Path
 
 from refactor.imagga import ImageContext
+
+CATEGORY_MANIFEST = ".refactor_image_categories.json"
+
+
+def managed_category_dirs(output_dir: Path) -> set[Path]:
+    """Return category directories created by earlier Refactor runs."""
+    manifest = output_dir / CATEGORY_MANIFEST
+    if not manifest.exists():
+        return set()
+    try:
+        folders = json.loads(manifest.read_text(encoding="utf-8")).get("folders", [])
+    except (OSError, json.JSONDecodeError):
+        return set()
+    return {
+        (output_dir / folder).resolve() for folder in folders
+        if isinstance(folder, str) and (output_dir / folder).is_dir()
+    }
+
+
+def save_managed_category_dirs(output_dir: Path, folders: set[str]) -> None:
+    """Record categories so future scans do not re-organize their contents."""
+    payload = {"folders": sorted(folders)}
+    (output_dir / CATEGORY_MANIFEST).write_text(
+        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def plan_moves(

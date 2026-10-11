@@ -10,8 +10,11 @@ The CLI entry point in [refactor/cli.py](refactor/cli.py) provides:
 - `tree` — prints a recursive directory tree through [refactor/tree.py](refactor/tree.py).
 - `scan` — collects basic file and directory metadata through [refactor/scanner.py](refactor/scanner.py) and [refactor/metadata.py](refactor/metadata.py).
 - `setup` — configures a multimodal backend (`hosted` or `local`), persisted to `~/.refactor/config.json`.
-- `get-image-context` — classifies images using a backend shim layer and writes JSON context.
-- `refactor-images` — copies or moves images based on generated context.
+- `get-image-context` — obtains Imagga V3 tags/captions, asks Gemini to choose a
+  destination category, and writes JSON context.
+- `refactor-images` — automatically refreshes image context, then moves images
+  into Gemini-selected existing or new category folders (`--copy` is available
+  when the originals must be retained).
 - Path checks through [refactor/validation.py](refactor/validation.py), including existence, directory type, and read access.
 - Optional filename exclusions through [refactor/ignore.py](refactor/ignore.py).
 
@@ -29,7 +32,18 @@ After installing `refactor-cli`, the first CLI run prompts:
    - Recommends an OSS multimodal model and records it in config  
    - Uses a local shim stub today (full local runtime integration is a follow-up)
 
-The shim layer provides one interface for image classification, regardless of hosted/local backend, so future modalities can reuse the same abstraction.
+For the hosted workflow, local images are uploaded to Imagga and classified with
+the V3 `/tags` endpoint using `model=pro` and `include_caption=true`. The
+resulting tags/caption and the destination root's current folders are sent to
+Gemini. Gemini selects one safe category name per image, reusing a suitable
+folder where possible and naming a new category otherwise. The organizer creates
+that directory as needed. The shim layer provides one interface for image
+classification, regardless of hosted/local backend, so future modalities can
+reuse the same abstraction.
+
+Run `refactor refactor-images ./incoming --output-dir ./organized` to generate
+fresh context and move the images. Add `--dry-run` to inspect destinations or
+`--copy` to retain the originals.
 
 ## Techniques used
 
