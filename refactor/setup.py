@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 
 import typer
@@ -10,6 +11,67 @@ from refactor.hardware import detect_hardware, recommend_local_model
 
 def _interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def masked_prompt(label: str) -> str:
+    """Read a secret while rendering one asterisk per entered character.
+
+    ``getpass`` and Typer's ``hide_input`` deliberately render nothing. This
+    reader keeps terminal echo disabled but provides visible paste/type feedback
+    without ever writing the secret itself to stdout.
+    """
+    if not _interactive():
+        raise typer.BadParameter(f"{label} requires an interactive terminal.")
+
+    typer.echo(f"{label}: ", nl=False)
+    characters: list[str] = []
+
+    if os.name == "nt":
+        import msvcrt
+
+        while True:
+            character = msvcrt.getwch()
+            if character in {"\r", "\n"}:
+                break
+            if character == "\003":
+                raise KeyboardInterrupt
+            if character in {"\b", "\x7f"}:
+                if characters:
+                    characters.pop()
+                    typer.echo("\b \b", nl=False)
+                continue
+            if character.isprintable():
+                characters.append(character)
+                typer.echo("*", nl=False)
+    else:
+        import termios
+        import tty
+
+        file_descriptor = sys.stdin.fileno()
+        original_settings = termios.tcgetattr(file_descriptor)
+        try:
+            tty.setraw(file_descriptor)
+            while True:
+                character = sys.stdin.read(1)
+                if character in {"\r", "\n"}:
+                    break
+                if character == "\003":
+                    raise KeyboardInterrupt
+                if character == "\004":
+                    raise EOFError
+                if character in {"\b", "\x7f"}:
+                    if characters:
+                        characters.pop()
+                        typer.echo("\b \b", nl=False)
+                    continue
+                if character.isprintable():
+                    characters.append(character)
+                    typer.echo("*", nl=False)
+        finally:
+            termios.tcsetattr(file_descriptor, termios.TCSADRAIN, original_settings)
+
+    typer.echo()
+    return "".join(characters)
 
 
 def run_setup() -> dict:
@@ -27,9 +89,9 @@ def run_setup() -> dict:
         typer.echo("- Imagga: https://imagga.com")
         typer.echo("- Gemini: https://ai.google.dev")
 
-        imagga_api_key = typer.prompt("IMAGGA_API_KEY", hide_input=True)
-        imagga_api_secret = typer.prompt("IMAGGA_API_SECRET", hide_input=True)
-        gemini_api_key = typer.prompt("GEMINI_API_KEY", hide_input=True)
+        imagga_api_key = masked_prompt("IMAGGA_API_KEY")
+        imagga_api_secret = masked_prompt("IMAGGA_API_SECRET")
+        gemini_api_key = masked_prompt("GEMINI_API_KEY")
 
         save_env_vars(
             {

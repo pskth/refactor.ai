@@ -33,7 +33,7 @@ After installing `refactor-cli`, the first CLI run prompts:
    - Uses a local shim stub today (full local runtime integration is a follow-up)
 
 For the hosted workflow, local images are uploaded to Imagga and classified with
-the V3 `/tags` endpoint using `model=pro` and `include_caption=true`. The
+the V3 `/tags` endpoint using `model=light` and `include_caption=true`. The
 resulting tags/caption and the destination root's current folders are sent to
 Gemini. Gemini selects one safe category name per image, reusing a suitable
 folder where possible and naming a new category otherwise. The organizer creates

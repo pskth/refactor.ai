@@ -1,4 +1,5 @@
 notes.md
+testing-dir
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

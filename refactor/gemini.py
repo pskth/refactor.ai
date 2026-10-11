@@ -17,7 +17,8 @@ load_dotenv()
 if ENV_FILE.exists():
     load_dotenv(ENV_FILE)
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+# Current Gemini API default. Users may set GEMINI_MODEL to override it.
+DEFAULT_MODEL = "gemini-3.8-flash"
 
 
 def _safe_folder_name(value: str) -> str:

@@ -28,6 +28,7 @@ UPLOADS_URL = "https://api.imagga.com/v2/uploads"
 TAGS_URL = "https://api.imagga.com/v3/tags"
 DEFAULT_MIN_CONFIDENCE = 40.0
 DEFAULT_TAG_LIMIT = 10
+DEFAULT_TAGGING_MODEL = "light"
 
 
 @dataclass
@@ -102,7 +103,11 @@ class ImaggaClient:
     def _fetch_tags(self, params: dict) -> dict:
         """Internal: call /tags endpoint and return parsed JSON."""
         url = TAGS_URL
-        params = {**params, "model": "pro", "include_caption": "true"}
+        params = {
+            **params,
+            "model": DEFAULT_TAGGING_MODEL,
+            "include_caption": "true",
+        }
 
         response = requests.get(url, auth=self.auth, params=params, timeout=60)
 
