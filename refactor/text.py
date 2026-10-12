@@ -1,4 +1,4 @@
-"""Document discovery, text extraction, and Gemini categorization."""
+"""Document discovery, text extraction, and configured-backend categorization."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
-from refactor.gemini import GeminiFolderClassifier
 from refactor.ignore import should_ignore
+from refactor.shim import build_document_classifier
 
 TEXT_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
 TEXT_CATEGORY_MANIFEST = ".refactor_text_categories.json"
@@ -57,7 +57,7 @@ def scan_documents(path: str, patterns: list[str], excluded_dirs: set[Path]) -> 
 
 
 def extract_text(file_path: Path) -> str:
-    """Extract text from supported non-PDF document formats."""
+    """Extract text locally from supported document formats."""
     if file_path.suffix.lower() in {".txt", ".md"}:
         return file_path.read_text(encoding="utf-8", errors="replace")[:MAX_TEXT_CHARS]
     if file_path.suffix.lower() == ".docx":
@@ -65,23 +65,38 @@ def extract_text(file_path: Path) -> str:
             root = ElementTree.fromstring(document.read("word/document.xml"))
         text = " ".join(node.text or "" for node in root.iter() if node.tag.endswith("}t"))
         return text[:MAX_TEXT_CHARS]
+    if file_path.suffix.lower() == ".pdf":
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:
+            raise EnvironmentError(
+                "PDF classification needs the `pypdf` package. Reinstall refactor-cli to include it."
+            ) from exc
+        reader = PdfReader(file_path)
+        return "\n".join(page.extract_text() or "" for page in reader.pages)[:MAX_TEXT_CHARS]
     return ""
 
 
 def classify_documents(
-    documents: list[Path], category_root: Path
+    documents: list[Path], category_root: Path, config: dict
 ) -> tuple[list[TextContext], list[tuple[Path, Exception]]]:
-    classifier = GeminiFolderClassifier()
+    classifier = build_document_classifier(config)
     results: list[TextContext] = []
     failures: list[tuple[Path, Exception]] = []
     for document in documents:
         try:
             is_pdf = document.suffix.lower() == ".pdf"
             if is_pdf and document.stat().st_size > MAX_PDF_BYTES:
-                raise ValueError("PDF exceeds Gemini's 50 MB input limit")
-            folder = classifier.choose_document_folder(
-                document, extract_text(document), category_root, is_pdf=is_pdf
-            )
+                raise ValueError("PDF exceeds Refactor's 50 MB document input limit")
+            if config.get("backend") == "hosted":
+                # Preserve the hosted flow's native PDF input capability.
+                folder = classifier.choose_document_folder(
+                    document, extract_text(document), category_root, is_pdf=is_pdf
+                )
+            else:
+                folder = classifier.choose_document_folder(
+                    document, extract_text(document), category_root
+                )
             results.append(TextContext(str(document.resolve()), folder))
         except Exception as exc:
             failures.append((document, exc))

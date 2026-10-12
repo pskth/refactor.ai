@@ -4,7 +4,7 @@ dynamic = ["version"]
 description = "CLI tool to organize files using AI"
 readme = "README.md"
 requires-python = ">=3.8"
-dependencies = ["typer", "requests", "python-dotenv"]
+dependencies = ["typer", "requests", "python-dotenv", "pypdf"]
 
 [project.scripts]
 refactor = "refactor.cli:app"

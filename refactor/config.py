@@ -27,7 +27,7 @@ def default_config() -> dict[str, Any]:
         "local": {
             "runtime": "ollama",
             "recommended_model": "",
-            "status": "stub",
+            "status": "not_configured",
         },
     }
 

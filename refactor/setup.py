@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import sys
 
 import typer
 
 from refactor.config import config_exists, default_config, load_config, save_config, save_env_vars
 from refactor.hardware import detect_hardware, recommend_local_model
+from refactor.shim import ollama_model_available, ollama_server_available
 
 
 def _interactive() -> bool:
@@ -80,7 +83,7 @@ def run_setup() -> dict:
     typer.echo("\nRefactor setup")
     typer.echo("Choose backend:")
     typer.echo("  1) Hosted model (bring your own API keys)")
-    typer.echo("  2) Local multimodal recommendation (stub integration)")
+    typer.echo("  2) Local multimodal model with Ollama")
 
     choice = typer.prompt("Select option", default="1").strip()
 
@@ -120,14 +123,41 @@ def run_setup() -> dict:
         typer.echo(f"- Model: {model}")
         typer.echo(f"- Why: {reason}")
         typer.echo("- Suggested runtime: ollama")
-        typer.echo("- Example install: ollama pull " + model)
+        typer.echo("- Model command: ollama pull " + model)
 
         config["backend"] = "local"
         config["setup_skipped"] = False
         config["local"]["runtime"] = "ollama"
         config["local"]["recommended_model"] = model
-        config["local"]["status"] = "stub"
-        typer.echo("Local backend configured with stub shim for now.")
+        config["local"]["status"] = "not_ready"
+
+        if not shutil.which("ollama"):
+            typer.echo("\nOllama is not installed, so Refactor cannot use a local model yet.")
+            typer.echo("Install Ollama from: https://ollama.com/download")
+            typer.echo("Then run:")
+            typer.echo(f"  ollama pull {model}")
+            typer.echo("  refactor setup")
+        elif not ollama_server_available():
+            typer.echo("\nOllama is installed but its local server is not running.")
+            typer.echo("Start it in another terminal with:")
+            typer.echo("  ollama serve")
+            typer.echo("Then rerun: refactor setup")
+        elif ollama_model_available(model):
+            config["local"]["status"] = "ready"
+            typer.echo(f"\nOllama model '{model}' is installed and ready to use.")
+        else:
+            typer.echo(f"\nOllama is ready, but '{model}' is not installed.")
+            if typer.confirm(f"Download '{model}' now?", default=True):
+                result = subprocess.run(["ollama", "pull", model], check=False)
+                if result.returncode == 0 and ollama_model_available(model):
+                    config["local"]["status"] = "ready"
+                    typer.echo(f"Local model '{model}' is ready to use.")
+                else:
+                    typer.echo(
+                        f"Could not verify '{model}'. Run `ollama pull {model}` and then `refactor setup` again."
+                    )
+            else:
+                typer.echo(f"Run `ollama pull {model}` and then `refactor setup` when ready.")
 
     else:
         raise typer.BadParameter("Invalid option. Choose 1 or 2.")

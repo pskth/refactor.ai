@@ -10,13 +10,13 @@ The CLI entry point in [refactor/cli.py](refactor/cli.py) provides:
 - `tree` — prints a recursive directory tree through [refactor/tree.py](refactor/tree.py).
 - `scan` — collects basic file and directory metadata through [refactor/scanner.py](refactor/scanner.py) and [refactor/metadata.py](refactor/metadata.py).
 - `setup` — configures a multimodal backend (`hosted` or `local`), persisted to `~/.refactor/config.json`.
-- `get-image-context` — obtains Imagga V3 tags/captions, asks Gemini to choose a
-  destination category, and writes JSON context.
-- `refactor-images` — automatically refreshes image context, then moves images
-  into Gemini-selected existing or new category folders (`--copy` is available
-  when the originals must be retained).
-- `refactor-text` — uses Gemini to categorize `.txt`, `.md`, `.pdf`, and
-  `.docx` files.
+- `get-image-context` — obtains image tags/captions and asks the configured
+  backend to choose a destination category, then writes JSON context.
+- `refactor-images` — automatically refreshes image context with the configured
+  backend, then moves images into model-selected category folders (`--copy` is
+  available when the originals must be retained).
+- `refactor-text` — uses the configured backend to categorize `.txt`, `.md`,
+  `.pdf`, and `.docx` files.
 - `now` — runs `refactor-text` and then `refactor-images`, so mixed folders are
   organized in one invocation.
 - Path checks through [refactor/validation.py](refactor/validation.py), including existence, directory type, and read access.
@@ -31,10 +31,19 @@ After installing `refactor-cli`, the first CLI run prompts:
 1. **Hosted model (bring your own API keys)**  
    - Prompts for `IMAGGA_API_KEY`, `IMAGGA_API_SECRET`, and `GEMINI_API_KEY`  
    - Saves credentials to `~/.refactor/.env` with restricted file permissions
-2. **Local multimodal recommendation (stub)**  
-   - Detects basic hardware (CPU, memory, NVIDIA GPU/VRAM if available)  
-   - Recommends an OSS multimodal model and records it in config  
-   - Uses a local shim stub today (full local runtime integration is a follow-up)
+2. **Local multimodal model with Ollama**
+   - Detects CPU, memory, and NVIDIA hardware (even if VRAM is temporarily unavailable)
+   - Recommends a vision model and verifies the local Ollama runtime
+   - Guides the user to install Ollama or pulls the recommended model when Ollama is ready
+   - Sends images to the local Ollama API for captions, tags, and category selection; documents are text-extracted locally and categorized through the same Ollama model. No image or document data is uploaded to Refactor services.
+
+For a local setup, install [Ollama](https://ollama.com/download), then run the exact command printed by setup, for example:
+
+```shell
+ollama pull gemma3:4b
+```
+
+Run `refactor setup` again after the download finishes. Refactor verifies both the local Ollama service and the selected model before classifying images or documents.
 
 For the hosted workflow, local images are uploaded to Imagga and classified with
 the V3 `/tags` endpoint using `model=light` and `include_caption=true`. The
@@ -50,8 +59,9 @@ fresh context and move the images. Add `--dry-run` to inspect destinations or
 `--copy` to retain the originals.
 
 Run `refactor now ./incoming --output-dir ./organized` to organize supported
-documents and images together. PDFs are sent to Gemini as native document input;
-text, Markdown, and Word files are text-extracted locally before classification.
+documents and images together. Hosted mode sends PDFs to Gemini as native
+document input; local mode text-extracts PDFs, text, Markdown, and Word files
+before sending their contents to Ollama.
 
 `--dry-run` saves a source-validated organization plan. Running the same command
 without `--dry-run` reuses that plan without another Imagga or Gemini request,

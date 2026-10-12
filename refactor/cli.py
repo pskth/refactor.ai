@@ -32,8 +32,11 @@ TEXT_PLAN_FILE = ".refactor_text_context.json"
 
 
 @app.callback()
-def bootstrap() -> None:
-    maybe_run_first_time_setup()
+def bootstrap(ctx: typer.Context) -> None:
+    # `refactor setup` is itself the setup command. Running first-time setup in
+    # the callback as well caused that command to prompt twice on a new install.
+    if ctx.invoked_subcommand != "setup":
+        maybe_run_first_time_setup()
 
 
 @app.command()
@@ -44,7 +47,7 @@ def version() -> None:
 
 @app.command()
 def setup() -> None:
-    """Configure hosted or local multimodal backend."""
+    """Configure hosted APIs or a local Ollama multimodal backend."""
     command_setup()
 
 
@@ -98,7 +101,7 @@ def get_image_context(
     category_root: str = typer.Option(
         ".",
         "--category-root",
-        help="Directory whose existing folders Gemini may reuse",
+        help="Directory whose existing folders the configured model may reuse",
     ),
     write_context: bool = typer.Option(
         True,
@@ -159,9 +162,8 @@ def get_image_context(
         try:
             results = choose_category_folders(config, results, Path(category_root))
         except Exception as exc:
-            # Folder selection is an essential part of the hosted workflow; do
-            # not silently fall back to an Imagga top-tag directory.
-            typer.echo(f"Error: Gemini folder selection failed: {exc}", err=True)
+            # Folder selection is essential; do not silently fall back to a top tag.
+            typer.echo(f"Error: model folder selection failed: {exc}", err=True)
             raise typer.Exit(code=1)
 
     if verbose:
@@ -201,7 +203,7 @@ def refactor_text(
     dry_run: bool = typer.Option(False, "--dry-run"),
     move: bool = typer.Option(True, "--move/--copy"),
 ) -> list:
-    """Use Gemini to categorize .txt, .md, .pdf, and .docx files."""
+    """Use the configured backend to categorize .txt, .md, .pdf, and .docx files."""
     from pathlib import Path
 
     try:
@@ -209,7 +211,8 @@ def refactor_text(
         out = Path(output_dir)
         if not out.exists() or not out.is_dir():
             raise ValueError(f"Output directory is not a directory: {output_dir}")
-    except ValueError as exc:
+        config = ensure_backend_configured()
+    except (ValueError, EnvironmentError) as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1)
 
@@ -229,7 +232,7 @@ def refactor_text(
     else:
         typer.echo(f"Found {len(documents)} document(s) in '{path}'")
         try:
-            contexts, failures = classify_documents(documents, out)
+            contexts, failures = classify_documents(documents, out, config)
         except EnvironmentError as exc:
             typer.echo(f"Error: {exc}", err=True)
             raise typer.Exit(code=1)
@@ -286,12 +289,12 @@ def refactor_images(
     min_confidence: float = typer.Option(
         40.0,
         "--min-confidence",
-        help="Minimum Imagga tag confidence to retain",
+        help="Minimum Imagga tag confidence to retain (hosted backend only)",
     ),
 ) -> list:
     """
-    Generate fresh Imagga and Gemini context, then organise images into
-    Gemini-selected subdirectories. The context cache is refreshed on every run.
+    Generate fresh context with the configured image backend, then organise
+    images into model-selected subdirectories. The context cache is refreshed on every run.
 
     By default, images are MOVED. Use --copy to preserve source files.
     """
@@ -321,7 +324,7 @@ def refactor_images(
     if contexts is not None:
         typer.echo(f"Reusing validated image context from {context_path}.")
     else:
-        typer.echo("Generating image context with Imagga and Gemini...")
+        typer.echo("Generating image context with the configured backend...")
         contexts = get_image_context(
             path=path,
             output=str(context_path),
