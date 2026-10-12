@@ -53,6 +53,11 @@ Run `refactor now ./incoming --output-dir ./organized` to organize supported
 documents and images together. PDFs are sent to Gemini as native document input;
 text, Markdown, and Word files are text-extracted locally before classification.
 
+`--dry-run` saves a source-validated organization plan. Running the same command
+without `--dry-run` reuses that plan without another Imagga or Gemini request,
+provided the source files and output directory are unchanged. Any added, removed,
+or modified source file invalidates the plan and triggers fresh classification.
+
 ## Techniques used
 
 - **Recursive traversal with `pathlib`** — [refactor/scanner.py](refactor/scanner.py) uses [`Path.rglob()`](https://docs.python.org/3/library/pathlib.html#pathlib.Path.rglob) to discover nested paths. [refactor/tree.py](refactor/tree.py) recursively walks directory entries to render a text tree.

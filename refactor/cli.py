@@ -11,19 +11,24 @@ from refactor.organizer import (
     plan_moves,
     save_managed_category_dirs,
 )
+from refactor.plan_cache import load_valid_plan, save_plan
 from refactor.scanner import scan_directory
 from refactor.setup import command_setup, ensure_backend_configured, maybe_run_first_time_setup
 from refactor.shim import build_image_classifier, choose_category_folders
 from refactor.text import (
+    TextContext,
     classify_documents,
     managed_text_dirs,
     save_managed_text_dirs,
     scan_documents,
 )
+from refactor.imagga import ImageContext
 from refactor.tree import print_tree
 from refactor.validation import validate_path
 
 app = typer.Typer(no_args_is_help=True)
+
+TEXT_PLAN_FILE = ".refactor_text_context.json"
 
 
 @app.callback()
@@ -215,14 +220,23 @@ def refactor_text(
         typer.echo("No supported document files found in the specified directory.")
         return []
 
-    typer.echo(f"Found {len(documents)} document(s) in '{path}'")
-    try:
-        contexts, failures = classify_documents(documents, out)
-    except EnvironmentError as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1)
-    for document, error in failures:
-        typer.echo(f"  [!] Skipping {document.name}: {error}", err=True)
+    plan_path = Path(path) / TEXT_PLAN_FILE
+    contexts = load_valid_plan(
+        plan_path, "text", path, output_dir, documents, TextContext
+    )
+    if contexts is not None:
+        typer.echo(f"Reusing validated document context from {plan_path}.")
+    else:
+        typer.echo(f"Found {len(documents)} document(s) in '{path}'")
+        try:
+            contexts, failures = classify_documents(documents, out)
+        except EnvironmentError as exc:
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(code=1)
+        for document, error in failures:
+            typer.echo(f"  [!] Skipping {document.name}: {error}", err=True)
+        if contexts and len(contexts) == len(documents):
+            save_plan(plan_path, "text", path, output_dir, documents, contexts)
 
     if not contexts:
         typer.echo("No documents were categorized.")
@@ -299,15 +313,27 @@ def refactor_images(
     if excluded:
         typer.echo(f"Skipping {len(excluded)} folder(s) created by an earlier Refactor run.")
 
-    typer.echo("Generating image context with Imagga and Gemini...")
-    contexts = get_image_context(
-        path=path,
-        output=str(context_path),
-        min_confidence=min_confidence,
-        verbose=False,
-        category_root=output_dir,
-        write_context=not dry_run,
+    patterns = load_ignore_patterns()
+    current_images = scan_images(path, patterns, excluded)
+    contexts = load_valid_plan(
+        context_path, "image", path, output_dir, current_images, ImageContext
     )
+    if contexts is not None:
+        typer.echo(f"Reusing validated image context from {context_path}.")
+    else:
+        typer.echo("Generating image context with Imagga and Gemini...")
+        contexts = get_image_context(
+            path=path,
+            output=str(context_path),
+            min_confidence=min_confidence,
+            verbose=False,
+            category_root=output_dir,
+            write_context=False,
+        )
+        if contexts and len(contexts) == len(current_images):
+            save_plan(
+                context_path, "image", path, output_dir, current_images, contexts
+            )
 
     if not contexts:
         typer.echo("Context cache is empty. Nothing to organize.")
