@@ -21,6 +21,17 @@ if ENV_FILE.exists():
 # Current Gemini API default. Users may set GEMINI_MODEL to override it.
 DEFAULT_MODEL = "gemini-3.8-flash"
 
+FOLDER_NAMING_SYSTEM_PROMPT = (
+    "You assign precise folder names for file organization. Return a short, specific "
+    "semantic topic of one to three lowercase words, using underscores if needed. "
+    "Use a meaningful qualifier when it distinguishes the subject, for example "
+    "'gate_exam', 'password_reset', or 'research_papers'. Never copy, abbreviate, "
+    "or derive the folder name from a filename, document title, path, person name, "
+    "opaque identifier, date, or version number. Do not use generic names such as "
+    "'information', 'documents', 'files', 'misc', or 'other'. Reuse a matching "
+    "existing category exactly when one is provided."
+)
+
 
 def _safe_folder_name(value: str) -> str:
     """Return one relative directory name, never a path supplied by the model."""
@@ -58,14 +69,15 @@ class GeminiFolderClassifier:
         prompt = (
             "Choose exactly one concise, lowercase category folder for every image. "
             "Prefer an existing category when it accurately fits; otherwise create a "
-            "new, broad and reusable category. Folder names must be a single relative "
-            "directory name (letters, numbers, spaces, underscores, or hyphens only). "
-            "Do not use filenames, paths, or explanations. Return JSON only in this "
+            "new, precise and reusable semantic category. Folder names must be a single "
+            "relative directory name (letters, numbers, spaces, underscores, or hyphens only). "
+            "Return JSON only in this "
             "shape: {\"folders\":[{\"id\":0,\"folder\":\"example\"}]}.\n\n"
             f"Existing categories: {json.dumps(existing)}\n"
             f"Images and Imagga semantic context: {json.dumps(images, ensure_ascii=False)}"
         )
         payload = {
+            "systemInstruction": {"parts": [{"text": FOLDER_NAMING_SYSTEM_PROMPT}]},
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "responseMimeType": "application/json",
@@ -115,7 +127,7 @@ class GeminiFolderClassifier:
             "Choose one concise, lowercase category folder for this document. "
             "Use letters, numbers, spaces, underscores, or hyphens only; return "
             "JSON only as {\"folder\":\"example\"}. Prefer an existing category "
-            "when it fits. Do not use a filename or path.\n\n"
+            "when it fits.\n\n"
             f"Existing categories: {json.dumps(sorted(entry.name for entry in category_root.iterdir() if entry.is_dir()))}\n"
             f"Filename: {file_path.name}\n"
         )
@@ -131,6 +143,7 @@ class GeminiFolderClassifier:
             )
 
         payload = {
+            "systemInstruction": {"parts": [{"text": FOLDER_NAMING_SYSTEM_PROMPT}]},
             "contents": [{"parts": parts}],
             "generationConfig": {
                 "responseMimeType": "application/json",

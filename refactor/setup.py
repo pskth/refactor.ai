@@ -9,7 +9,11 @@ import typer
 
 from refactor.config import config_exists, default_config, load_config, save_config, save_env_vars
 from refactor.hardware import detect_hardware, recommend_local_model
-from refactor.shim import ollama_model_available, ollama_server_available
+from refactor.shim import (
+    ollama_installed_models,
+    ollama_model_available,
+    ollama_server_available,
+)
 
 
 def _interactive() -> bool:
@@ -77,6 +81,28 @@ def masked_prompt(label: str) -> str:
     return "".join(characters)
 
 
+def _choose_local_model(recommended_model: str, installed_models: list[str]) -> str:
+    """Let the user choose the hardware recommendation or an installed tag."""
+    options = [recommended_model]
+    options.extend(
+        model
+        for model in installed_models
+        if model not in {recommended_model, f"{recommended_model}:latest"}
+    )
+
+    typer.echo("\nChoose an Ollama model:")
+    typer.echo(f"  1) {recommended_model} (recommended for this computer)")
+    for index, model in enumerate(options[1:], start=2):
+        typer.echo(f"  {index}) {model} (already installed)")
+    typer.echo("- Choose a vision-capable model to organize images.")
+
+    selection = typer.prompt("Select option", default="1").strip()
+    try:
+        return options[int(selection) - 1]
+    except (ValueError, IndexError):
+        raise typer.BadParameter(f"Invalid model option. Choose 1 through {len(options)}.")
+
+
 def run_setup() -> dict:
     config = default_config()
 
@@ -88,9 +114,9 @@ def run_setup() -> dict:
     choice = typer.prompt("Select option", default="1").strip()
 
     if choice == "1":
-        typer.echo("\nCreate keys from provider dashboards and paste them below.")
-        typer.echo("- Imagga: https://imagga.com")
-        typer.echo("- Gemini: https://ai.google.dev")
+        typer.echo("\nCreate both provider credentials, then paste them below:")
+        typer.echo("- Imagga API keys: https://imagga.com/auth/signup")
+        typer.echo("- Google Gemini API key: https://aistudio.google.com/app/apikey")
 
         imagga_api_key = masked_prompt("IMAGGA_API_KEY")
         imagga_api_secret = masked_prompt("IMAGGA_API_SECRET")
@@ -123,6 +149,8 @@ def run_setup() -> dict:
         typer.echo(f"- Model: {model}")
         typer.echo(f"- Why: {reason}")
         typer.echo("- Suggested runtime: ollama")
+        if model.startswith("qwen3-vl:"):
+            typer.echo("- Requires Ollama 0.12.7 or newer")
         typer.echo("- Model command: ollama pull " + model)
 
         config["backend"] = "local"
@@ -142,22 +170,23 @@ def run_setup() -> dict:
             typer.echo("Start it in another terminal with:")
             typer.echo("  ollama serve")
             typer.echo("Then rerun: refactor setup")
-        elif ollama_model_available(model):
-            config["local"]["status"] = "ready"
-            typer.echo(f"\nOllama model '{model}' is installed and ready to use.")
         else:
-            typer.echo(f"\nOllama is ready, but '{model}' is not installed.")
-            if typer.confirm(f"Download '{model}' now?", default=True):
-                result = subprocess.run(["ollama", "pull", model], check=False)
-                if result.returncode == 0 and ollama_model_available(model):
+            selected_model = _choose_local_model(model, ollama_installed_models())
+            config["local"]["model"] = selected_model
+            if ollama_model_available(selected_model):
+                config["local"]["status"] = "ready"
+                typer.echo(f"\nOllama model '{selected_model}' is installed and ready to use.")
+            elif typer.confirm(f"Download '{selected_model}' now?", default=True):
+                result = subprocess.run(["ollama", "pull", selected_model], check=False)
+                if result.returncode == 0 and ollama_model_available(selected_model):
                     config["local"]["status"] = "ready"
-                    typer.echo(f"Local model '{model}' is ready to use.")
+                    typer.echo(f"Local model '{selected_model}' is ready to use.")
                 else:
                     typer.echo(
-                        f"Could not verify '{model}'. Run `ollama pull {model}` and then `refactor setup` again."
+                        f"Could not verify '{selected_model}'. Run `ollama pull {selected_model}` and then `refactor setup` again."
                     )
             else:
-                typer.echo(f"Run `ollama pull {model}` and then `refactor setup` when ready.")
+                typer.echo(f"Run `ollama pull {selected_model}` and then `refactor setup` when ready.")
 
     else:
         raise typer.BadParameter("Invalid option. Choose 1 or 2.")

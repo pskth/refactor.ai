@@ -33,17 +33,21 @@ After installing `refactor-cli`, the first CLI run prompts:
    - Saves credentials to `~/.refactor/.env` with restricted file permissions
 2. **Local multimodal model with Ollama**
    - Detects CPU, memory, and NVIDIA hardware (even if VRAM is temporarily unavailable)
-   - Recommends a vision model and verifies the local Ollama runtime
+   - Selects the largest Qwen3-VL vision-and-text model likely to fit, using
+     NVIDIA VRAM first and system RAM as a CPU/offload fallback
    - Guides the user to install Ollama or pulls the recommended model when Ollama is ready
    - Sends images to the local Ollama API for captions, tags, and category selection; documents are text-extracted locally and categorized through the same Ollama model. No image or document data is uploaded to Refactor services.
 
 For a local setup, install [Ollama](https://ollama.com/download), then run the exact command printed by setup, for example:
 
 ```shell
-ollama pull gemma3:4b
+ollama pull qwen3-vl:8b
 ```
 
-Run `refactor setup` again after the download finishes. Refactor verifies both the local Ollama service and the selected model before classifying images or documents.
+The exact model command is hardware-specific; Qwen3-VL requires Ollama 0.12.7
+or later. Run `refactor setup` again after the download finishes. Refactor
+verifies both the local Ollama service and the selected model before classifying
+images or documents.
 
 For the hosted workflow, local images are uploaded to Imagga and classified with
 the V3 `/tags` endpoint using `model=light` and `include_caption=true`. The

@@ -78,6 +78,17 @@ FOLDER_BATCH_SCHEMA = {
     "additionalProperties": False,
 }
 
+FOLDER_NAMING_SYSTEM_PROMPT = (
+    "You assign precise folder names for file organization. Return a short, specific "
+    "semantic topic of one to three lowercase words, using underscores if needed. "
+    "Use a meaningful qualifier when it distinguishes the subject, for example "
+    "'gate_exam', 'password_reset', or 'research_papers'. Never copy, abbreviate, "
+    "or derive the folder name from a filename, document title, path, person name, "
+    "opaque identifier, date, or version number. Do not use generic names such as "
+    "'information', 'documents', 'files', 'misc', or 'other'. Reuse a matching "
+    "existing category exactly when one is provided."
+)
+
 
 def _parse_ollama_json(response: dict, description: str) -> dict:
     """Return one JSON object without exposing unbounded model output on errors."""
@@ -124,12 +135,35 @@ def ollama_server_available() -> bool:
 
 
 def ollama_model_available(model_name: str) -> bool:
+    return any(
+        installed_name == model_name
+        or installed_name == f"{model_name}:latest"
+        for installed_name in ollama_installed_models()
+    )
+
+
+def ollama_installed_models() -> list[str]:
+    """Return installed Ollama model tags in a stable order.
+
+    The tags endpoint is the source of truth here rather than the ``ollama``
+    executable output, which keeps setup consistent with the server Refactor
+    will actually use for inference.
+    """
     try:
         response = _ollama_request("/api/tags")
     except EnvironmentError:
-        return False
-    installed = {model.get("name", "") for model in response.get("models", [])}
-    return model_name in installed or f"{model_name}:latest" in installed
+        return []
+
+    return sorted(
+        {
+            name
+            for model in response.get("models", [])
+            if isinstance(model, dict)
+            and isinstance((name := model.get("name")), str)
+            and name
+        },
+        key=str.lower,
+    )
 
 
 class OllamaImageClassifier(ImageClassifier):
@@ -200,8 +234,8 @@ class OllamaImageClassifier(ImageClassifier):
         prompt = (
             "Choose exactly one concise, lowercase category folder for every image. "
             "Prefer an existing category when it accurately fits; otherwise create a "
-            "new, broad and reusable category. Folder names must be a single relative "
-            "directory name (letters, numbers, spaces, underscores, or hyphens only). "
+            "new, precise and reusable semantic category. Folder names must be a single "
+            "relative directory name (letters, numbers, spaces, underscores, or hyphens only). "
             "Return exactly one id/folder object for every image and no other keys.\n\n"
             f"Existing categories: {json.dumps(existing)}\n"
             f"Images and local semantic context: {json.dumps(images, ensure_ascii=False)}"
@@ -214,7 +248,10 @@ class OllamaImageClassifier(ImageClassifier):
                 "format": FOLDER_BATCH_SCHEMA,
                 "options": {"temperature": 0, "num_predict": max(80, len(contexts) * 40)},
                 "think": False,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [
+                    {"role": "system", "content": FOLDER_NAMING_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
             },
         )
         result = _parse_ollama_json(response, "image folder-selection")
@@ -253,8 +290,8 @@ class OllamaDocumentClassifier:
         )
         prompt = (
             "Choose one concise, lowercase category folder for this document. "
-            "Prefer an existing category when it fits. The folder must not be a filename "
-            "or path. Return one JSON object matching the supplied schema and no other keys.\n\n"
+            "Prefer an existing category when it fits. Return one JSON object matching "
+            "the supplied schema and no other keys.\n\n"
             f"Existing categories: {json.dumps(existing)}\n"
             f"Filename: {file_path.name}\n"
             f"Document text:\n{extracted_text}"
@@ -267,7 +304,10 @@ class OllamaDocumentClassifier:
                 "format": FOLDER_SCHEMA,
                 "options": {"temperature": 0, "num_predict": 80},
                 "think": False,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [
+                    {"role": "system", "content": FOLDER_NAMING_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
             },
         )
         result = _parse_ollama_json(response, "document classification")
@@ -290,7 +330,7 @@ def build_image_classifier(config: dict, min_confidence: float) -> ImageClassifi
 
     if backend == "local":
         local_cfg = config.get("local", {})
-        model_name = local_cfg.get("recommended_model")
+        model_name = local_cfg.get("model") or local_cfg.get("recommended_model")
         if not model_name:
             raise EnvironmentError("No local Ollama model is configured. Run `refactor setup`.")
         if not ollama_server_available():
@@ -311,7 +351,8 @@ def build_document_classifier(config: dict):
     if config.get("backend") == "hosted":
         return GeminiFolderClassifier()
     if config.get("backend") == "local":
-        model_name = config.get("local", {}).get("recommended_model")
+        local_cfg = config.get("local", {})
+        model_name = local_cfg.get("model") or local_cfg.get("recommended_model")
         if not model_name:
             raise EnvironmentError("No local Ollama model is configured. Run `refactor setup`.")
         if not ollama_server_available():
@@ -333,7 +374,8 @@ def choose_category_folders(
     if config.get("backend") == "hosted":
         return GeminiFolderClassifier().choose_folders(contexts, category_root)
     if config.get("backend") == "local":
-        model_name = config.get("local", {}).get("recommended_model")
+        local_cfg = config.get("local", {})
+        model_name = local_cfg.get("model") or local_cfg.get("recommended_model")
         if not model_name:
             raise EnvironmentError("No local Ollama model is configured. Run `refactor setup`.")
         return OllamaImageClassifier(model_name).choose_folders(contexts, category_root)

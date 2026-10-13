@@ -14,6 +14,18 @@ class HardwareSpec:
     gpu_vram_gb: float | None = None
 
 
+# Approximate download sizes for Ollama's current Qwen3-VL quantized tags.
+# The selector reserves capacity for the OS, image encoder, context, and the
+# rest of Refactor instead of attempting to consume every reported GB.
+MULTIMODAL_MODEL_TIERS: tuple[tuple[str, float], ...] = (
+    ("qwen3-vl:32b", 21.0),
+    ("qwen3-vl:30b", 20.0),
+    ("qwen3-vl:8b", 6.1),
+    ("qwen3-vl:4b", 3.3),
+    ("qwen3-vl:2b", 1.9),
+)
+
+
 def _memory_gb() -> float:
     pagesize = os.sysconf("SC_PAGE_SIZE")
     pages = os.sysconf("SC_PHYS_PAGES")
@@ -96,34 +108,38 @@ def detect_hardware() -> HardwareSpec:
 
 
 def recommend_local_model(spec: HardwareSpec) -> tuple[str, str]:
-    if spec.has_nvidia_gpu and (spec.gpu_vram_gb or 0) >= 8:
-        return (
-            "gemma3:4b",
-            "Multimodal instruction-following model suitable for both document and image organization.",
-        )
+    """Recommend the largest local vision-and-text model likely to fit.
 
-    if spec.has_nvidia_gpu:
-        return (
-            "gemma3:4b",
-            "A multimodal model is required for reliable structured document and image categorization; "
-            "verify available memory if NVIDIA VRAM cannot be read.",
-        )
+    GPU VRAM is preferred because it determines whether the model can run at
+    useful speed. System RAM remains a valid fallback: Ollama can run a model
+    on CPU (or partially offload it) when VRAM is insufficient.
+    """
+    gpu_budget = (spec.gpu_vram_gb or 0) * 0.80
+    ram_budget = spec.memory_gb * 0.60
 
-    if spec.memory_gb >= 16:
-        return (
-            "gemma3:4b",
-            "Multimodal model with enough context for document and image organization on 16GB+ RAM.",
-        )
+    for model, size_gb in MULTIMODAL_MODEL_TIERS:
+        if spec.has_nvidia_gpu and gpu_budget >= size_gb:
+            return (
+                model,
+                f"Largest Qwen3-VL vision-and-text model expected to fit in {spec.gpu_vram_gb:.1f} GB "
+                "of NVIDIA VRAM while reserving capacity for runtime overhead.",
+            )
+        if ram_budget >= size_gb:
+            if spec.has_nvidia_gpu:
+                return (
+                    model,
+                    f"Largest model expected to fit in {spec.memory_gb:.1f} GB of system RAM. "
+                    "It may partially run on CPU because available GPU VRAM is lower.",
+                )
+            return (
+                model,
+                f"Largest vision-and-text model expected to fit in {spec.memory_gb:.1f} GB of system RAM. "
+                "CPU-only inference will be slower.",
+            )
 
-    if spec.memory_gb >= 8:
-        return (
-            "gemma3:4b",
-            "Smallest recommended multimodal option for structured document and image organization; "
-            "expect slower operation on CPU-only systems.",
-        )
-
+    model, size_gb = MULTIMODAL_MODEL_TIERS[-1]
     return (
-        "gemma3:4b",
-        "Refactor requires a multimodal instruction-following model for all supported file types. "
-        "This system may not have enough memory; use hosted mode or add memory if the model cannot run.",
+        model,
+        f"Smallest supported vision-and-text model ({size_gb:.1f} GB download). "
+        "Available memory is below the recommended headroom; use hosted mode if it cannot run reliably.",
     )
